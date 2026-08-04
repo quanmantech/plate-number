@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>车牌钥匙扣生成器</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      padding: 40px;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    h1 { font-size: 1.5rem; color: #1a1a2e; margin-bottom: 8px; }
+    .subtitle { color: #666; font-size: .9rem; margin-bottom: 24px; }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 28px;
+      background: #f0f2f5;
+      padding: 4px;
+      border-radius: 10px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: #666;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .tab-btn.active {
+      background: #fff;
+      color: #e8651a;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .preview {
+      background: #e8651a;
+      border-radius: 8px;
+      padding: 20px 16px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 72px;
+      border: 3px solid #c44e0a;
+    }
+
+    .preview-side {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: .75rem;
+      line-height: 1.1;
+      min-width: 20px;
+      opacity: .9;
+    }
+
+    .preview-main {
+      flex: 1;
+      text-align: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 1.6rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .field { margin-bottom: 20px; }
+
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color .2s;
+    }
+
+    input[type="text"]:focus { outline: none; border-color: #e8651a; }
+
+    .file-drop {
+      border: 2px dashed #ddd;
+      border-radius: 8px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+
+    .file-drop:hover, .file-drop.dragover {
+      border-color: #e8651a;
+      background: #fff8f4;
+    }
+
+    .file-drop input { display: none; }
+    .file-drop .icon { font-size: 2rem; margin-bottom: 8px; }
+    .file-drop p { color: #666; font-size: .9rem; }
+    .file-name { margin-top: 10px; font-size: .85rem; color: #e8651a; font-weight: 600; }
+
+    .hint { font-size: .78rem; color: #999; margin-top: 4px; line-height: 1.5; }
+
+    .column-list {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      font-size: .78rem;
+      color: #555;
+      line-height: 1.7;
+    }
+
+    .column-list strong { color: #333; }
+
+    button[type="submit"], .submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: #e8651a;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+      margin-top: 8px;
+    }
+
+    button[type="submit"]:hover, .submit-btn:hover { background: #c44e0a; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+
+    .error {
+      background: #fff0f0;
+      color: #c0392b;
+      border: 1px solid #f5c6c6;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: .85rem;
+      margin-top: 16px;
+      display: none;
+    }
+
+    .progress-wrap {
+      display: none;
+      margin-top: 16px;
+    }
+
+    .progress-wrap.active { display: block; }
+
+    .progress-bar {
+      height: 10px;
+      background: #eee;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #e8651a, #f5a623);
+      border-radius: 5px;
+      transition: width .3s ease;
+    }
+
+    .progress-text {
+      font-size: .82rem;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .progress-text strong {
+      color: #e8651a;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>车牌钥匙扣生成器</h1>
+    <p class="subtitle">输入文字或上传订单表，一键生成可 3D 打印的 STL 模型</p>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="single">单个生成</button>
+      <button class="tab-btn" data-tab="batch">批量生成</button>
+    </div>
+
+    <!-- 单个生成 -->
+    <div class="tab-panel active" id="panel-single">
+      <div class="preview">
+        <div class="preview-side" id="previewSide"></div>
+        <div class="preview-main" id="previewMain">YOUR</div>
+      </div>
+
+      <form id="singleForm">
+        <div class="field">
+          <label for="mainText">主文字（右侧）</label>
+          <input type="text" id="mainText" name="main_text" value="YOUR"
+                 maxlength="8" placeholder="例如 YOUR" autocomplete="off">
+          <p class="hint">在剩余区域内居中显示，最多 8 个字符，支持字母、数字、空格及符号</p>
+        </div>
+
+        <div class="field">
+          <label for="sideText">左侧文字（可选）</label>
+          <input type="text" id="sideText" name="side_text" value=""
+                 maxlength="3" placeholder="留空则不显示，例如 ACT" autocomplete="off">
+          <p class="hint">左侧竖排小字，最多 3 个字符，可留空，支持符号</p>
+        </div>
+
+        <button type="submit" id="singleSubmitBtn">生成并下载 STL</button>
+        <div class="error" id="singleError"></div>
+      </form>
+    </div>
+
+    <!-- 批量生成 -->
+    <div class="tab-panel" id="panel-batch">
+      <div class="column-list">
+        <strong>Excel 必要列：</strong><br>
+        订单号、订单数量、文本-定制文字标题、文本-定制文字内容、选项-标题、选项-选择项输出文本<br><br>
+        <strong>文字映射：</strong>
+        Custom Text → 右侧主文字；State → 左侧文字（可空）<br>
+        <strong>文件夹编码：</strong>
+        Text and Border Color + Plate Color 组合为文件夹名
+      </div>
+
+      <form id="batchForm">
+        <div class="field">
+          <label>上传订单 Excel</label>
+          <div class="file-drop" id="fileDrop">
+            <input type="file" id="excelFile" accept=".xlsx,.xlsm">
+            <div class="icon">📄</div>
+            <p>点击或拖拽上传 .xlsx 文件</p>
+            <div class="file-name" id="fileName"></div>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="batchSubmitBtn">批量生成并下载 ZIP</button>
+
+        <div class="progress-wrap" id="batchProgress">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <div class="progress-text" id="progressText">
+            <strong id="progressPercent">0%</strong> — <span id="progressMessage">准备中…</span>
+          </div>
+        </div>
+
+        <div class="error" id="batchError"></div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Tab 切换
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // ── 单个生成 ──
+    const mainInput = document.getElementById('mainText');
+    const sideInput = document.getElementById('sideText');
+    const previewMain = document.getElementById('previewMain');
+    const previewSide = document.getElementById('previewSide');
+    const singleForm = document.getElementById('singleForm');
+    const singleError = document.getElementById('singleError');
+    const singleSubmitBtn = document.getElementById('singleSubmitBtn');
+
+    function updatePreview() {
+      const main = mainInput.value.toUpperCase() || 'YOUR';
+      const side = sideInput.value.toUpperCase();
+      previewMain.textContent = main;
+      previewSide.innerHTML = side ? side.split('').join('<br>') : '';
+    }
+
+    mainInput.addEventListener('input', updatePreview);
+    sideInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function parseFilename(res, fallback) {
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const utf8Match = disposition.match(/filename\*=UTF-8''([^;\n]+)/i);
+      if (utf8Match) {
+        try {
+          return decodeURIComponent(utf8Match[1].trim());
+        } catch (_) { /* fall through */ }
+      }
+      const quotedMatch = disposition.match(/filename="([^"]+)"/i);
+      if (quotedMatch) return quotedMatch[1];
+      const asciiMatch = disposition.match(/filename=([^;\n]+)/i);
+      if (asciiMatch) return asciiMatch[1].trim();
+      return fallback;
+    }
+
+    singleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      singleError.style.display = 'none';
+      singleSubmitBtn.disabled = true;
+      singleSubmitBtn.textContent = '生成中…';
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            main_text: mainInput.value,
+            side_text: sideInput.value,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || '生成失败');
+        }
+
+        const blob = await res.blob();
+        downloadBlob(blob, parseFilename(res, 'keychain.stl'));
+      } catch (err) {
+        singleError.textContent = err.message;
+        singleError.style.display = 'block';
+      } finally {
+        singleSubmitBtn.disabled = false;
+        singleSubmitBtn.textContent = '生成并下载 STL';
+      }
+    });
+
+    // ── 批量生成 ──
+    const batchForm = document.getElementById('batchForm');
+    const batchError = document.getElementById('batchError');
+    const batchSubmitBtn = document.getElementById('batchSubmitBtn');
+    const batchProgress = document.getElementById('batchProgress');
+    const progressFill = document.getElementById('progressFill');
+    const progressPercent = document.getElementById('progressPercent');
+    const progressMessage = document.getElementById('progressMessage');
+    const excelFile = document.getElementById('excelFile');
+    const fileDrop = document.getElementById('fileDrop');
+    const fileName = document.getElementById('fileName');
+
+    function showBatchProgress(percent, message) {
+      batchProgress.classList.add('active');
+      progressFill.style.width = percent + '%';
+      progressPercent.textContent = percent + '%';
+      progressMessage.textContent = message;
+    }
+
+    function hideBatchProgress() {
+      batchProgress.classList.remove('active');
+      progressFill.style.width = '0%';
+      progressPercent.textContent = '0%';
+      progressMessage.textContent = '准备中…';
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function pollBatchProgress(jobId) {
+      while (true) {
+        const res = await fetch('/api/batch-progress/' + jobId);
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || '获取进度失败');
+        }
+
+        showBatchProgress(data.percent, data.message);
+
+        if (data.status === 'done') {
+          return data;
+        }
+        if (data.status === 'error') {
+          throw new Error(data.error || data.message || '批量生成失败');
+        }
+
+        await sleep(500);
+      }
+    }
+
+    fileDrop.addEventListener('click', () => excelFile.click());
+
+    fileDrop.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      fileDrop.classList.add('dragover');
+    });
+
+    fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+
+    fileDrop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fileDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length) {
+        excelFile.files = e.dataTransfer.files;
+        fileName.textContent = e.dataTransfer.files[0].name;
+      }
+    });
+
+    excelFile.addEventListener('change', () => {
+      fileName.textContent = excelFile.files[0]?.name || '';
+    });
+
+    batchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      batchError.style.display = 'none';
+      hideBatchProgress();
+
+      if (!excelFile.files.length) {
+        batchError.textContent = '请先上传 Excel 文件';
+        batchError.style.display = 'block';
+        return;
+      }
+
+      batchSubmitBtn.disabled = true;
+      batchSubmitBtn.textContent = '批量生成中…';
+      showBatchProgress(0, '正在上传并解析 Excel…');
+
+      try {
+        const formData = new FormData();
+        formData.append('file', excelFile.files[0]);
+
+        const startRes = await fetch('/api/batch-generate', {
+          method: 'POST',
+          body: formData,
+        });
+        const startData = await startRes.json();
+
+        if (!startRes.ok) {
+          throw new Error(startData.error || '启动批量生成失败');
+        }
+
+        const progressData = await pollBatchProgress(startData.job_id);
+
+        showBatchProgress(100, '正在下载 ZIP…');
+        const downloadRes = await fetch('/api/batch-download/' + startData.job_id);
+
+        if (!downloadRes.ok) {
+          const errData = await downloadRes.json();
+          throw new Error(errData.error || '下载失败');
+        }
+
+        const blob = await downloadRes.blob();
+        const zipName = progressData.zip_name || parseFilename(downloadRes, '双色车牌.zip');
+        downloadBlob(blob, zipName);
+        showBatchProgress(100, '全部完成！');
+      } catch (err) {
+        batchError.textContent = err.message;
+        batchError.style.display = 'block';
+        hideBatchProgress();
+      } finally {
+        batchSubmitBtn.disabled = false;
+        batchSubmitBtn.textContent = '批量生成并下载 ZIP';
+      }
+    });
+  </script>
+</body>
+</html>

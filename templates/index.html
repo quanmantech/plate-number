@@ -23,11 +23,56 @@
       box-shadow: 0 4px 24px rgba(0,0,0,.08);
       padding: 40px;
       width: 100%;
-      max-width: 520px;
+      max-width: 560px;
     }
 
     h1 { font-size: 1.5rem; color: #1a1a2e; margin-bottom: 8px; }
-    .subtitle { color: #666; font-size: .9rem; margin-bottom: 24px; }
+    .subtitle { color: #666; font-size: .9rem; margin-bottom: 20px; }
+
+    .style-picker {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .style-option {
+      border: 2px solid #e8e8e8;
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      background: #fff;
+      text-align: left;
+      transition: border-color .2s, background .2s;
+    }
+
+    .style-option:hover { border-color: #f0b48a; }
+    .style-option.active {
+      border-color: #e8651a;
+      background: #fff8f4;
+    }
+
+    .style-option .name {
+      display: block;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+
+    .style-option .desc {
+      font-size: .75rem;
+      color: #888;
+      line-height: 1.4;
+    }
+
+    .style-option .warn {
+      display: none;
+      margin-top: 6px;
+      font-size: .72rem;
+      color: #c0392b;
+    }
+
+    .style-option.missing .warn { display: block; }
 
     .tabs {
       display: flex;
@@ -63,14 +108,36 @@
     .preview {
       background: #e8651a;
       border-radius: 8px;
-      padding: 20px 16px;
+      padding: 16px;
       margin-bottom: 28px;
       display: flex;
       align-items: center;
       gap: 12px;
       min-height: 72px;
       border: 3px solid #c44e0a;
+      position: relative;
     }
+
+    .preview.slim {
+      min-height: 52px;
+      border-radius: 10px;
+      padding: 10px 14px 10px 28px;
+    }
+
+    .preview-hole {
+      display: none;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid #c44e0a;
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .preview.slim .preview-hole { display: block; }
 
     .preview-side {
       display: flex;
@@ -84,6 +151,8 @@
       opacity: .9;
     }
 
+    .preview.slim .preview-side { display: none; }
+
     .preview-main {
       flex: 1;
       text-align: center;
@@ -92,6 +161,12 @@
       font-size: 1.6rem;
       letter-spacing: .12em;
       text-transform: uppercase;
+      white-space: pre;
+    }
+
+    .preview.slim .preview-main {
+      font-size: 1.25rem;
+      letter-spacing: .16em;
     }
 
     .field { margin-bottom: 20px; }
@@ -213,7 +288,27 @@
 <body>
   <div class="card">
     <h1>车牌钥匙扣生成器</h1>
-    <p class="subtitle">输入文字或上传订单表，一键生成可 3D 打印的 STL 模型</p>
+    <p class="subtitle">选择款式，输入文字或上传订单表，一键生成可 3D 打印的 STL 模型</p>
+
+    <div class="style-picker" id="stylePicker">
+      {% for s in styles %}
+      <button type="button"
+              class="style-option{% if loop.first %} active{% endif %}{% if not s.model_ready or not s.font_ready %} missing{% endif %}"
+              data-style="{{ s.id }}"
+              data-has-side="{{ '1' if s.has_side_text else '0' }}"
+              data-max-main="{{ s.max_main_length }}"
+              data-max-side="{{ s.max_side_length }}"
+              data-placeholder="{{ s.preview_placeholder }}"
+              data-model-ready="{{ '1' if s.model_ready else '0' }}"
+              data-font-ready="{{ '1' if s.font_ready else '0' }}">
+        <span class="name">{{ s.label }}</span>
+        <span class="desc">{{ s.description }}</span>
+        <span class="warn">
+          {% if not s.model_ready and not s.font_ready %}缺少空白模型与字体{% elif not s.model_ready %}缺少空白模型{% else %}缺少字体{% endif %}
+        </span>
+      </button>
+      {% endfor %}
+    </div>
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="single">单个生成</button>
@@ -222,20 +317,21 @@
 
     <!-- 单个生成 -->
     <div class="tab-panel active" id="panel-single">
-      <div class="preview">
+      <div class="preview" id="previewPlate">
+        <div class="preview-hole" aria-hidden="true"></div>
         <div class="preview-side" id="previewSide"></div>
         <div class="preview-main" id="previewMain">YOUR</div>
       </div>
 
       <form id="singleForm">
         <div class="field">
-          <label for="mainText">主文字（右侧）</label>
+          <label for="mainText" id="mainTextLabel">主文字</label>
           <input type="text" id="mainText" name="main_text" value="YOUR"
                  maxlength="8" placeholder="例如 YOUR" autocomplete="off">
-          <p class="hint">在剩余区域内居中显示，最多 8 个字符，支持字母、数字、空格及符号</p>
+          <p class="hint" id="mainTextHint">最多 8 个字符，支持字母、数字、空格及符号</p>
         </div>
 
-        <div class="field">
+        <div class="field" id="sideField">
           <label for="sideText">左侧文字（可选）</label>
           <input type="text" id="sideText" name="side_text" value=""
                  maxlength="3" placeholder="留空则不显示，例如 ACT" autocomplete="off">
@@ -249,11 +345,11 @@
 
     <!-- 批量生成 -->
     <div class="tab-panel" id="panel-batch">
-      <div class="column-list">
+      <div class="column-list" id="batchHints">
         <strong>Excel 必要列：</strong><br>
         订单号、订单数量、文本-定制文字标题、文本-定制文字内容、选项-标题、选项-选择项输出文本<br><br>
         <strong>文字映射：</strong>
-        Custom Text → 右侧主文字；State → 左侧文字（可空）<br>
+        <span id="batchTextMap">Custom Text → 右侧主文字；State → 左侧文字（可空）</span><br>
         <strong>文件夹编码：</strong>
         Text and Border Color + Plate Color 组合为文件夹名
       </div>
@@ -286,7 +382,57 @@
   </div>
 
   <script>
-    // Tab 切换
+    const styleButtons = [...document.querySelectorAll('.style-option')];
+    let currentStyle = styleButtons[0];
+
+    function selectedStyleId() {
+      return currentStyle?.dataset.style || 'classic';
+    }
+
+    function applyStyleUI() {
+      const hasSide = currentStyle.dataset.hasSide === '1';
+      const maxMain = currentStyle.dataset.maxMain || '8';
+      const maxSide = currentStyle.dataset.maxSide || '3';
+      const placeholder = currentStyle.dataset.placeholder || 'TEXT';
+      const isSlim = currentStyle.dataset.style === 'slim';
+
+      document.getElementById('sideField').style.display = hasSide ? 'block' : 'none';
+      document.getElementById('previewPlate').classList.toggle('slim', isSlim);
+
+      const mainInput = document.getElementById('mainText');
+      const sideInput = document.getElementById('sideText');
+      mainInput.maxLength = Number(maxMain);
+      sideInput.maxLength = Number(maxSide);
+
+      document.getElementById('mainTextLabel').textContent = hasSide ? '主文字（右侧）' : '车牌文字';
+      document.getElementById('mainTextHint').textContent =
+        `最多 ${maxMain} 个字符（超过标准长度会自动缩小），支持字母、数字、空格及符号` +
+        (isSlim ? '（例如 HAII LBH）' : '');
+
+      if (!mainInput.value || mainInput.dataset.auto === '1') {
+        mainInput.value = placeholder;
+        mainInput.dataset.auto = '1';
+      }
+      if (!hasSide) {
+        sideInput.value = '';
+      }
+
+      document.getElementById('batchTextMap').textContent = hasSide
+        ? 'Custom Text → 右侧主文字；State → 左侧文字（可空）'
+        : 'Custom Text → 车牌文字（本款式忽略 State）';
+
+      updatePreview();
+    }
+
+    styleButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        styleButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentStyle = btn;
+        applyStyleUI();
+      });
+    });
+
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -296,7 +442,6 @@
       });
     });
 
-    // ── 单个生成 ──
     const mainInput = document.getElementById('mainText');
     const sideInput = document.getElementById('sideText');
     const previewMain = document.getElementById('previewMain');
@@ -305,16 +450,21 @@
     const singleError = document.getElementById('singleError');
     const singleSubmitBtn = document.getElementById('singleSubmitBtn');
 
+    mainInput.dataset.auto = '1';
+
     function updatePreview() {
-      const main = mainInput.value.toUpperCase() || 'YOUR';
+      const placeholder = currentStyle?.dataset.placeholder || 'YOUR';
+      const main = mainInput.value.toUpperCase() || placeholder;
       const side = sideInput.value.toUpperCase();
       previewMain.textContent = main;
       previewSide.innerHTML = side ? side.split('').join('<br>') : '';
     }
 
-    mainInput.addEventListener('input', updatePreview);
+    mainInput.addEventListener('input', () => {
+      mainInput.dataset.auto = '0';
+      updatePreview();
+    });
     sideInput.addEventListener('input', updatePreview);
-    updatePreview();
 
     function downloadBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
@@ -343,6 +493,13 @@
     singleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       singleError.style.display = 'none';
+
+      if (currentStyle.dataset.modelReady !== '1' || currentStyle.dataset.fontReady !== '1') {
+        singleError.textContent = '当前款式缺少空白模型或字体，请先放到对应目录';
+        singleError.style.display = 'block';
+        return;
+      }
+
       singleSubmitBtn.disabled = true;
       singleSubmitBtn.textContent = '生成中…';
 
@@ -351,6 +508,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            style: selectedStyleId(),
             main_text: mainInput.value,
             side_text: sideInput.value,
           }),
@@ -372,7 +530,6 @@
       }
     });
 
-    // ── 批量生成 ──
     const batchForm = document.getElementById('batchForm');
     const batchError = document.getElementById('batchError');
     const batchSubmitBtn = document.getElementById('batchSubmitBtn');
@@ -451,6 +608,12 @@
       batchError.style.display = 'none';
       hideBatchProgress();
 
+      if (currentStyle.dataset.modelReady !== '1' || currentStyle.dataset.fontReady !== '1') {
+        batchError.textContent = '当前款式缺少空白模型或字体，请先放到对应目录';
+        batchError.style.display = 'block';
+        return;
+      }
+
       if (!excelFile.files.length) {
         batchError.textContent = '请先上传 Excel 文件';
         batchError.style.display = 'block';
@@ -464,6 +627,7 @@
       try {
         const formData = new FormData();
         formData.append('file', excelFile.files[0]);
+        formData.append('style', selectedStyleId());
 
         const startRes = await fetch('/api/batch-generate', {
           method: 'POST',
@@ -486,7 +650,7 @@
         }
 
         const blob = await downloadRes.blob();
-        const zipName = progressData.zip_name || parseFilename(downloadRes, '双色车牌.zip');
+        const zipName = progressData.zip_name || parseFilename(downloadRes, '车牌模型.zip');
         downloadBlob(blob, zipName);
         showBatchProgress(100, '全部完成！');
       } catch (err) {
@@ -498,6 +662,8 @@
         batchSubmitBtn.textContent = '批量生成并下载 ZIP';
       }
     });
+
+    applyStyleUI();
   </script>
 </body>
 </html>

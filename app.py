@@ -1,11 +1,11 @@
 """车牌钥匙扣 STL 生成 — Flask Web 应用。"""
 
-import io
 import os
 from urllib.parse import quote
 
 from flask import Flask, render_template, request, send_file, jsonify, Response
 
+import config
 from generator import generate_keychain_to_buffer, ModelGenerationError
 from generator.batch_jobs import create_batch_job, get_batch_job, remove_batch_job
 from generator.text_utils import normalize_custom_text
@@ -30,9 +30,27 @@ def _attachment_response(data: bytes, filename: str, mimetype: str) -> Response:
     )
 
 
+def _parse_style_id(data: dict | None = None) -> str:
+    raw = ""
+    if data:
+        raw = data.get("style") or data.get("style_id") or ""
+    if not raw:
+        raw = request.form.get("style") or request.args.get("style") or ""
+    style_id = (raw or config.DEFAULT_STYLE).strip().lower()
+    try:
+        return config.get_style(style_id)["id"]
+    except ValueError as e:
+        raise ModelGenerationError(str(e)) from e
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", styles=config.list_styles())
+
+
+@app.route("/api/styles")
+def api_styles():
+    return jsonify({"styles": config.list_styles(), "default": config.DEFAULT_STYLE})
 
 
 @app.route("/api/generate", methods=["POST"])
@@ -42,20 +60,25 @@ def api_generate():
     side_text = (data.get("side_text") or request.form.get("side_text", ""))
 
     try:
+        style_id = _parse_style_id(data)
+        style = config.get_style(style_id)
         main_text = normalize_custom_text(main_text)
-        side_text = normalize_custom_text(side_text, allow_empty=True)
+        if style.get("has_side_text"):
+            side_text = normalize_custom_text(side_text, allow_empty=True)
+        else:
+            side_text = ""
     except ModelGenerationError as e:
         return jsonify({"error": str(e)}), 400
 
     try:
-        buf = generate_keychain_to_buffer(main_text, side_text)
+        buf = generate_keychain_to_buffer(main_text, side_text, style_id=style_id)
     except ModelGenerationError as e:
         return jsonify({"error": str(e)}), 400
     except Exception:
         app.logger.exception("生成模型失败")
         return jsonify({"error": "生成模型时发生内部错误，请查看服务器日志"}), 500
 
-    filename = f"keychain_{main_text.upper()}"
+    filename = f"keychain_{style_id}_{main_text.upper()}"
     if side_text:
         filename += f"_{side_text.upper()}"
     filename += ".stl"
@@ -79,8 +102,13 @@ def api_batch_generate():
     if ext not in ALLOWED_EXCEL_EXTENSIONS:
         return jsonify({"error": "仅支持 .xlsx 格式的 Excel 文件"}), 400
 
-    job_id = create_batch_job(upload.read())
-    return jsonify({"job_id": job_id})
+    try:
+        style_id = _parse_style_id()
+    except ModelGenerationError as e:
+        return jsonify({"error": str(e)}), 400
+
+    job_id = create_batch_job(upload.read(), style_id=style_id)
+    return jsonify({"job_id": job_id, "style": style_id})
 
 
 @app.route("/api/batch-progress/<job_id>")
@@ -114,7 +142,7 @@ def api_batch_download(job_id: str):
     if job.status != "done" or not job.zip_bytes:
         return jsonify({"error": "文件尚未生成完成"}), 400
 
-    zip_name = job.zip_name or "双色车牌.zip"
+    zip_name = job.zip_name or "车牌模型.zip"
     zip_bytes = job.zip_bytes
     remove_batch_job(job_id)
 
@@ -123,5 +151,6 @@ def api_batch_download(job_id: str):
 
 if __name__ == "__main__":
     # Windows 下 debug 重载器与 CadQuery/OCP 冲突，会导致页面 500
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host="127.0.0.1", port=port, use_reloader=False)
+    port = int(os.environ.get("PORT", 5001))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug, host="127.0.0.1", port=port, use_reloader=False)

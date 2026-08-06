@@ -1,34 +1,98 @@
-"""STL 车牌钥匙扣模型生成器。"""
+"""STL 车牌钥匙扣模型生成器（支持多款式）。"""
 
 from __future__ import annotations
 
 import io
 import os
+import shutil
 import tempfile
+import threading
 
 import cadquery as cq
 from cadquery.occ_impl.shapes import Shape, Compound
+from OCP.Font import Font_FontMgr
 from OCP.StlAPI import StlAPI_Reader
+from OCP.TCollection import TCollection_AsciiString
 from OCP.TopoDS import TopoDS_Shape
 
 import config
+
+# CadQuery/OCCT 用 AsciiString 传 fontPath：路径含中文等非 ASCII 时 CheckFont 会失败，
+# 随后静默回退到系统 Arial。按源字体路径缓存解析结果。
+_font_lock = threading.Lock()
+_resolved_fonts: dict[str, str] = {}
+_font_tmpdir: str | None = None
 
 
 class ModelGenerationError(Exception):
     """模型生成失败。"""
 
 
-def _validate_paths() -> None:
-    if not os.path.isfile(config.BASE_MODEL_PATH):
+def _path_is_ascii(path: str) -> bool:
+    try:
+        path.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _occt_can_load_font(path: str) -> bool:
+    mgr = Font_FontMgr.GetInstance_s()
+    return bool(mgr.CheckFont(TCollection_AsciiString(path).ToCString()))
+
+
+def _resolve_font_path(font_path: str) -> str:
+    """返回 OCCT 能加载的字体绝对路径；必要时复制到纯 ASCII 临时目录。"""
+    global _font_tmpdir
+
+    src = os.path.abspath(font_path)
+    with _font_lock:
+        cached = _resolved_fonts.get(src)
+        if cached and os.path.isfile(cached):
+            return cached
+
+        if not os.path.isfile(src):
+            raise ModelGenerationError(
+                f"字体文件未找到: {src}\n"
+                "请将 TTF/OTF 字体放到对应款式的 fonts 目录"
+            )
+
+        candidates = [src]
+        if not _path_is_ascii(src):
+            if _font_tmpdir is None:
+                _font_tmpdir = tempfile.mkdtemp(prefix="plate_font_")
+            ext = os.path.splitext(src)[1].lower() or ".ttf"
+            # 用哈希避免多款式字体互相覆盖
+            digest = abs(hash(src)) % (10**8)
+            dst = os.path.join(_font_tmpdir, f"font_{digest}{ext}")
+            shutil.copy2(src, dst)
+            candidates.insert(0, dst)
+
+        for path in candidates:
+            if _path_is_ascii(path) and _occt_can_load_font(path):
+                _resolved_fonts[src] = path
+                return path
+
         raise ModelGenerationError(
-            f"基础模型未找到: {config.BASE_MODEL_PATH}\n"
-            "请将不含文字的钥匙扣 STL 文件放到 assets/models/ 目录"
+            f"OpenCASCADE 无法加载字体: {src}\n"
+            "请确认字体文件有效，且尽量放在纯英文路径中。"
         )
-    if not os.path.isfile(config.FONT_PATH):
+
+
+def _load_style(style_id: str | None) -> dict:
+    try:
+        return config.get_style(style_id)
+    except ValueError as e:
+        raise ModelGenerationError(str(e)) from e
+
+
+def _validate_paths(style: dict) -> None:
+    if not os.path.isfile(style["base_model_path"]):
         raise ModelGenerationError(
-            f"字体文件未找到: {config.FONT_PATH}\n"
-            "请将 TTF/OTF 字体文件放到 assets/fonts/ 目录"
+            f"[{style['label']}] 基础模型未找到: {style['base_model_path']}\n"
+            f"请将不含文字的 STL 放到 {style['models_dir']}"
         )
+    _resolve_font_path(style["font_path"])
 
 
 def _load_base_stl(path: str) -> tuple[cq.Workplane, Shape]:
@@ -43,18 +107,20 @@ def _load_base_stl(path: str) -> tuple[cq.Workplane, Shape]:
     return wp, solid
 
 
-def _text_z(extrude_height: float, bb) -> float:
-    if config.TEXT_Z_BASE is not None:
-        return config.TEXT_Z_BASE
+def _text_z(style: dict, extrude_height: float, bb) -> float:
+    if style.get("text_z_base") is not None:
+        return style["text_z_base"]
     return bb.zmax - extrude_height
 
 
-def _make_text(text: str, font_size: float, extrude_height: float) -> cq.Workplane:
+def _make_text(
+    text: str, font_size: float, extrude_height: float, font_path: str
+) -> cq.Workplane:
     return cq.Workplane("XY").text(
         text.upper(),
         fontsize=font_size,
         distance=extrude_height,
-        fontPath=config.FONT_PATH,
+        fontPath=_resolve_font_path(font_path),
         halign="center",
         valign="center",
     )
@@ -86,47 +152,58 @@ def _wp_bbox(wp: cq.Workplane):
     return wp.val().BoundingBox()
 
 
-def _main_text_bounds(bb, side_wp: cq.Workplane | None = None) -> tuple[float, float]:
+def _main_text_bounds(
+    style: dict, bb, side_wp: cq.Workplane | None = None
+) -> tuple[float, float]:
     """计算主文字可用区域的水平范围 (left, right)。"""
-    cfg = config.MAIN_TEXT
+    cfg = style["main_text"]
     margin = cfg.get("horizontal_margin", 4.0)
-    right = bb.xmax - cfg.get("right_reserved", 6.0) - margin / 2
+    right = bb.xmax - cfg.get("right_reserved", 0.0) - margin / 2
 
     if side_wp is not None:
         side_right = _wp_bbox(side_wp).xmax
         left = side_right + cfg.get("gap_after_side", 3.0)
     else:
-        left = bb.xmin + margin / 2
+        left = bb.xmin + cfg.get("left_reserved", 0.0) + margin / 2
 
     return left, right
 
 
-def _main_text_center(bb, side_wp: cq.Workplane | None = None) -> tuple[float, float]:
-    """主文字在剩余区域内水平、垂直居中。"""
-    left, right = _main_text_bounds(bb, side_wp)
+def _main_text_center(
+    style: dict, bb, side_wp: cq.Workplane | None = None
+) -> tuple[float, float]:
+    left, right = _main_text_bounds(style, bb, side_wp)
     return (left + right) / 2, bb.center.y
 
 
 def _compute_main_font_size(
-    text: str, bb, side_wp: cq.Workplane | None = None
+    style: dict, text: str, bb, side_wp: cq.Workplane | None = None
 ) -> float:
-    cfg = config.MAIN_TEXT
+    cfg = style["main_text"]
     font_size = cfg["font_size"]
+    font_path = style["font_path"]
 
     if cfg.get("auto_fit", True):
         target_h = bb.ylen * cfg.get("height_fill_ratio", 0.80)
-        height_ratio = cfg.get("font_height_ratio", 0.684)
-        by_height = target_h / height_ratio
-
-        left, right = _main_text_bounds(bb, side_wp)
+        left, right = _main_text_bounds(style, bb, side_wp)
         avail_w = right - left
-        probe = _make_text(text, 10.0, cfg["extrude_height"])
-        probe_w = probe.val().BoundingBox().xlen
+
+        # 用探针实测当前字体宽高比（换字体后硬编码 ratio 会算错字号）
+        probe = _make_text(text, 10.0, cfg["extrude_height"], font_path)
+        probe_bb = probe.val().BoundingBox()
+        probe_w = probe_bb.xlen
+        probe_h = probe_bb.ylen
+        height_ratio = (
+            probe_h / 10.0
+            if probe_h > 0
+            else cfg.get("font_height_ratio", 0.7)
+        )
+        by_height = target_h / height_ratio
         by_width = avail_w * 10.0 / probe_w if probe_w > 0 else by_height
 
         font_size = min(font_size, by_height, by_width)
 
-    if not config.AUTO_SCALE:
+    if not style.get("auto_scale", True):
         return font_size
 
     max_len = cfg["max_length"]
@@ -134,39 +211,59 @@ def _compute_main_font_size(
         return font_size
 
     scale = max_len / len(text)
-    return max(config.AUTO_SCALE_MIN_FONT_SIZE, font_size * scale)
+    return max(style.get("auto_scale_min_font_size", 6.0), font_size * scale)
 
 
 def _create_main_text(
-    text: str, bb, side_wp: cq.Workplane | None = None
+    style: dict, text: str, bb, side_wp: cq.Workplane | None = None
 ) -> cq.Workplane:
-    cfg = config.MAIN_TEXT
-    font_size = _compute_main_font_size(text, bb, side_wp)
-    target_x, target_y = _main_text_center(bb, side_wp)
-    z = _text_z(cfg["extrude_height"], bb)
+    cfg = style["main_text"]
+    font_size = _compute_main_font_size(style, text, bb, side_wp)
+    target_x, target_y = _main_text_center(style, bb, side_wp)
+    z = _text_z(style, cfg["extrude_height"], bb)
 
-    wp = _make_text(text, font_size, cfg["extrude_height"])
+    wp = _make_text(text, font_size, cfg["extrude_height"], style["font_path"])
     return _place_text(wp, target_x, target_y, z)
 
 
-def _create_side_text(text: str, bb) -> cq.Workplane | None:
-    if not text:
+def _side_char_spacing(style: dict, font_size: float, n: int, bb) -> float:
+    """按字高与牌面高度计算竖排字距，避免换字体后粘连或溢出。"""
+    cfg = style["side_text"]
+    configured = cfg.get("char_spacing", font_size)
+    if n <= 1:
+        return configured
+
+    probe = _make_text("H", font_size, cfg["extrude_height"], style["font_path"])
+    char_h = probe.val().BoundingBox().ylen
+    fill = cfg.get("height_fill_ratio", 0.78)
+    avail = bb.ylen * fill
+    # (n-1)*spacing + char_h <= avail
+    max_spacing = (avail - char_h) / (n - 1) if avail > char_h else char_h
+    min_spacing = char_h * cfg.get("min_gap_ratio", 1.15)
+    # 在牌面内尽量拉开：取期望字距，夹在 [min_spacing, max_spacing]
+    desired = max(configured, min_spacing)
+    if max_spacing < min_spacing:
+        return max(0.1, max_spacing)
+    return min(desired, max_spacing)
+
+
+def _create_side_text(style: dict, text: str, bb) -> cq.Workplane | None:
+    if not text or not style.get("has_side_text") or not style.get("side_text"):
         return None
 
-    cfg = config.SIDE_TEXT
-    # 竖排显示时跳过空格字符（空格仅用于输入格式，不参与渲染）
+    cfg = style["side_text"]
     chars = [c for c in text.upper()[: cfg["max_length"]] if c != " "]
     if not chars:
         return None
-    z = _text_z(cfg["extrude_height"], bb)
-    spacing = cfg["char_spacing"]
+    z = _text_z(style, cfg["extrude_height"], bb)
+    font_size = cfg["font_size"]
     n = len(chars)
+    spacing = _side_char_spacing(style, font_size, n, bb)
 
-    # 逐字生成后竖排组合，再按包围盒整体居中
     result = None
     for i, char in enumerate(chars):
         y_local = (n - 1) / 2 * spacing - i * spacing
-        char_wp = _make_text(char, cfg["font_size"], cfg["extrude_height"])
+        char_wp = _make_text(char, font_size, cfg["extrude_height"], style["font_path"])
         char_wp = char_wp.translate((0, y_local, 0))
         result = char_wp if result is None else result.union(char_wp)
 
@@ -175,7 +272,6 @@ def _create_side_text(text: str, bb) -> cq.Workplane | None:
 
 
 def _collect_shapes(*workplanes: cq.Workplane | None) -> list:
-    """从 Workplane 中提取所有 Shape 对象。"""
     shapes: list = []
     for wp in workplanes:
         if wp is None:
@@ -189,45 +285,52 @@ def _collect_shapes(*workplanes: cq.Workplane | None) -> list:
 
 
 def _merge_model(base: cq.Workplane, *parts: cq.Workplane | None) -> Compound:
-    """将底座 STL 网格与文字实体合并为一个 Compound（STL 网格无法做布尔 union）。"""
     shapes = _collect_shapes(base, *parts)
     if not shapes:
         raise ModelGenerationError("模型合并失败：没有可导出的几何体")
     return Compound.makeCompound(shapes)
 
 
-def generate_keychain(main_text: str, side_text: str = "") -> bytes:
+def generate_keychain(
+    main_text: str,
+    side_text: str = "",
+    style_id: str | None = None,
+) -> bytes:
     """
     生成车牌钥匙扣 STL 模型。
 
     Args:
-        main_text: 主文字（居中显示，如 FRYTON）
-        side_text: 侧边竖排小字（如 WA），可选
-
-    Returns:
-        STL 文件二进制内容
+        main_text: 主文字
+        side_text: 侧边竖排小字（仅 classic 等支持侧字的款式）
+        style_id: 款式 id（classic / slim），默认 classic
     """
-    _validate_paths()
+    style = _load_style(style_id)
+    _validate_paths(style)
 
     main_text = main_text.strip()
-    side_text = side_text.strip()
+    side_text = side_text.strip() if style.get("has_side_text") else ""
 
     if not main_text:
         raise ModelGenerationError("主文字不能为空")
+
+    max_main = style["main_text"]["max_length"]
+    hard_max = style["main_text"].get("hard_max_length", max_main)
+    if len(main_text) > hard_max:
+        raise ModelGenerationError(f"主文字最多 {hard_max} 个字符")
+    if len(main_text) > max_main and not style.get("auto_scale", True):
+        raise ModelGenerationError(f"主文字最多 {max_main} 个字符")
+
+    side_cfg = style.get("side_text")
+    if side_cfg and len(side_text) > side_cfg["max_length"]:
         raise ModelGenerationError(
-            f"主文字最多 {config.MAIN_TEXT['max_length']} 个字符"
+            f"侧边文字最多 {side_cfg['max_length']} 个字符"
         )
 
-    if len(side_text) > config.SIDE_TEXT["max_length"]:
-        raise ModelGenerationError(
-            f"侧边文字最多 {config.SIDE_TEXT['max_length']} 个字符"
-        )
-
-    base, solid = _load_base_stl(config.BASE_MODEL_PATH)
+    base, solid = _load_base_stl(style["base_model_path"])
     bb = solid.BoundingBox()
 
-    side = _create_side_text(side_text, bb)
-    main = _create_main_text(main_text, bb, side)
+    side = _create_side_text(style, side_text, bb)
+    main = _create_main_text(style, main_text, bb, side)
     model = _merge_model(base, main, side)
 
     with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tmp:
@@ -242,8 +345,12 @@ def generate_keychain(main_text: str, side_text: str = "") -> bytes:
             os.remove(tmp_path)
 
 
-def generate_keychain_to_buffer(main_text: str, side_text: str = "") -> io.BytesIO:
+def generate_keychain_to_buffer(
+    main_text: str,
+    side_text: str = "",
+    style_id: str | None = None,
+) -> io.BytesIO:
     """生成 STL 并返回 BytesIO 缓冲区，便于 Flask 直接发送。"""
-    buf = io.BytesIO(generate_keychain(main_text, side_text))
+    buf = io.BytesIO(generate_keychain(main_text, side_text, style_id=style_id))
     buf.seek(0)
     return buf

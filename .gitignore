@@ -4,11 +4,14 @@ __pycache__/
 .venv/
 venv/
 env/
+runtime/
 
 # 生成产物
 output/
+dist/
 *.stl
 !assets/models/*.stl
+!assets/styles/**/*.stl
 *.zip
 
 # 本地配置 / 缓存

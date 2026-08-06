@@ -198,9 +198,9 @@ class _StlFileItem:
     side_text: str
 
 
-def _generate_stl_worker(main_text: str, side_text: str) -> bytes:
+def _generate_stl_worker(main_text: str, side_text: str, style_id: str) -> bytes:
     """进程池工作函数（需在模块顶层定义，供 Windows 多进程 pickle）。"""
-    return generate_keychain(main_text, side_text)
+    return generate_keychain(main_text, side_text, style_id=style_id)
 
 
 def _resolve_max_workers(task_count: int) -> int:
@@ -233,6 +233,7 @@ def _build_file_items(orders: list[BatchOrder]) -> list[_StlFileItem]:
 
 def _generate_models_parallel(
     items: list[_StlFileItem],
+    style_id: str,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[tuple[str, str], bytes]:
     """并行生成唯一文字组合的 STL，返回缓存字典。"""
@@ -255,7 +256,7 @@ def _generate_models_parallel(
 
     with ProcessPoolExecutor(max_workers=workers) as executor:
         future_map = {
-            executor.submit(_generate_stl_worker, key[0], key[1]): key
+            executor.submit(_generate_stl_worker, key[0], key[1], style_id): key
             for key in unique_keys
         }
         for future in as_completed(future_map):
@@ -271,6 +272,7 @@ def _generate_models_parallel(
 def generate_batch_zip(
     file_bytes: bytes,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    style_id: str | None = None,
 ) -> tuple[bytes, str]:
     """批量并行生成 STL 并打包为 ZIP，返回 (zip_bytes, zip_filename)。"""
 
@@ -278,19 +280,28 @@ def generate_batch_zip(
         if progress_callback:
             progress_callback(current, total, message)
 
+    try:
+        style = config.get_style(style_id)
+    except ValueError as e:
+        raise ModelGenerationError(str(e)) from e
+
     report(0, 1, "正在解析 Excel…")
     orders = parse_orders_from_excel(file_bytes)
+    if not style.get("has_side_text"):
+        for order in orders:
+            order.side_text = ""
+
     items = _build_file_items(orders)
 
     if not items:
         raise ModelGenerationError("没有需要生成的模型")
 
     total = len(items)
-    cache = _generate_models_parallel(items, progress_callback)
+    cache = _generate_models_parallel(items, style["id"], progress_callback)
 
     report(total, total, "正在打包 ZIP…")
     zip_buf = io.BytesIO()
-    zip_name = f"双色车牌-{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
+    zip_name = f"{style['zip_prefix']}-{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
 
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for item in items:

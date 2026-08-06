@@ -25,7 +25,7 @@ class BatchJob:
     error: str | None = None
 
 
-def create_batch_job(file_bytes: bytes) -> str:
+def create_batch_job(file_bytes: bytes, style_id: str | None = None) -> str:
     """创建并后台启动批量生成任务，返回 job_id。"""
     job_id = uuid.uuid4().hex
     job = BatchJob(job_id=job_id)
@@ -35,7 +35,7 @@ def create_batch_job(file_bytes: bytes) -> str:
 
     thread = threading.Thread(
         target=_run_batch_job,
-        args=(job_id, file_bytes),
+        args=(job_id, file_bytes, style_id),
         daemon=True,
     )
     thread.start()
@@ -52,7 +52,7 @@ def remove_batch_job(job_id: str) -> None:
         _jobs.pop(job_id, None)
 
 
-def _run_batch_job(job_id: str, file_bytes: bytes) -> None:
+def _run_batch_job(job_id: str, file_bytes: bytes, style_id: str | None = None) -> None:
     job = get_batch_job(job_id)
     if job is None:
         return
@@ -66,7 +66,9 @@ def _run_batch_job(job_id: str, file_bytes: bytes) -> None:
         job.message = message
 
     try:
-        zip_bytes, zip_name = generate_batch_zip(file_bytes, progress_callback=on_progress)
+        zip_bytes, zip_name = generate_batch_zip(
+            file_bytes, progress_callback=on_progress, style_id=style_id
+        )
         job.zip_bytes = zip_bytes
         job.zip_name = zip_name
         job.status = "done"

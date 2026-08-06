@@ -22,8 +22,8 @@ pip install -r requirements.txt
 
 | 款式 | ID | 尺寸 | 布局 | 资源目录 |
 |------|----|------|------|----------|
-| 双色车牌 | `classic` | 约 79.5×25×3 mm | 右侧挂环，可选左侧竖排 | `assets/models/` + `assets/fonts/`（或 `assets/styles/classic/`） |
-| 窄版车牌 | `slim` | 约 70×17×3 mm（文字挤出后总高约 4 mm） | 左侧挂孔，单行横排 | `assets/styles/slim/models/` + `assets/styles/slim/fonts/` |
+| 双色车牌 | `classic` | 约 79.5×25×3 mm | 右侧挂环，可选左侧竖排 | `assets/models/classic/` + `assets/fonts/classic/` |
+| 窄版车牌 | `slim` | 约 70×17×3 mm（文字挤出后总高约 4 mm） | 左侧挂孔，单行横排 | `assets/models/slim/` + `assets/fonts/slim/` |
 
 **模型格式要求：**
 
@@ -34,11 +34,13 @@ pip install -r requirements.txt
 | 单位 | **毫米 (mm)** |
 | 朝向 | 牌面朝上，文字沿 +Z 挤出（默认 `extrude_height=1.0`） |
 
-**窄版（slim）请将空白 STL 和字体分别放到：**
+**放置示例：**
 
 ```
-assets/styles/slim/models/   ← 空白模型（70×17×3）
-assets/styles/slim/fonts/    ← TTF/OTF 字体（文件名任意）
+assets/models/classic/   ← 双色空白模型
+assets/fonts/classic/    ← 双色字体
+assets/models/slim/      ← 窄版空白模型（70×17×3）
+assets/fonts/slim/       ← 窄版字体（TTF/OTF，文件名任意）
 ```
 
 ### 3. 调整文字参数
@@ -49,26 +51,17 @@ assets/styles/slim/fonts/    ← TTF/OTF 字体（文件名任意）
 
 ### 4. 启动应用
 
-**Windows：** 双击 `start.bat`
-
-- 使用系统已安装的 Python（优先项目 `venv`）
-- 未安装 Python 时会提示，并打开下载页：  
-  https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe  
-  （安装时勾选 Add python.exe to PATH）
-- 首次运行会自动创建 venv 并用清华源安装依赖
-
-或手动启动：
-
 ```bash
+python -m venv venv
+# Windows: venv\Scripts\activate
+# Linux/macOS: source venv/bin/activate
+pip install -r requirements.txt
 python app.py
 ```
 
 浏览器访问 http://127.0.0.1:5001
 
-### 5. 打包发布（Windows）
-
-双击 `package.bat`，在 `dist/` 生成源码 ZIP（不含 Python / venv）。  
-目标电脑需自行安装 Python 3.11/3.12，再运行 `start.bat`。
+可选：用 `scripts/install_deps.ps1` 安装依赖；用 `scripts/package.ps1` 打包源码 ZIP 到 `dist/`。
 
 ## API 接口
 
@@ -113,14 +106,16 @@ GET  /api/batch-download/<job_id> # 下载 ZIP（完成后）
 ```
 plate-number/
 ├── app.py
-├── config.py                 # STYLES 多款式配置
+├── config.py
 ├── generator/
 ├── templates/index.html
 ├── assets/
-│   ├── models/ + fonts/      # classic 兼容路径
-│   └── styles/
-│       ├── classic/{models,fonts}
-│       └── slim/{models,fonts}   ← 窄版资源放这里
+│   ├── models/
+│   │   ├── classic/   ← 双色空白 STL
+│   │   └── slim/      ← 窄版空白 STL
+│   └── fonts/
+│       ├── classic/   ← 双色字体
+│       └── slim/      ← 窄版字体
 └── requirements.txt
 ```
 

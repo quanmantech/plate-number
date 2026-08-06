@@ -42,39 +42,25 @@ Get-ChildItem -LiteralPath $Root -Force | Where-Object {
     }
 }
 
-$modelsSrc = Join-Path $Root "assets\models"
-$fontsSrc = Join-Path $Root "assets\fonts"
-$modelsDst = Join-Path $Stage "assets\models"
-$fontsDst = Join-Path $Stage "assets\fonts"
-New-Item -ItemType Directory -Force -Path $modelsDst | Out-Null
-New-Item -ItemType Directory -Force -Path $fontsDst | Out-Null
-if (Test-Path $modelsSrc) {
-    Get-ChildItem -Path $modelsSrc -Filter *.stl -File -ErrorAction SilentlyContinue |
-        Copy-Item -Destination $modelsDst -Force
-}
-if (Test-Path $fontsSrc) {
-    Get-ChildItem -Path $fontsSrc -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -in @(".ttf", ".otf") } |
-        Copy-Item -Destination $fontsDst -Force
+# 按款式复制：assets/{models,fonts}/<style_id>/
+function Copy-StyleAssets([string]$SrcRoot, [string]$DstRoot, [string[]]$Extensions) {
+    if (-not (Test-Path $SrcRoot)) { return }
+    New-Item -ItemType Directory -Force -Path $DstRoot | Out-Null
+    Get-ChildItem -LiteralPath $SrcRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $dst = Join-Path $DstRoot $_.Name
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Get-ChildItem -LiteralPath $_.FullName -File -ErrorAction SilentlyContinue |
+            Where-Object { $Extensions -contains $_.Extension.ToLowerInvariant() } |
+            Copy-Item -Destination $dst -Force
+    }
+    # 兼容旧布局：根目录下直接放文件
+    Get-ChildItem -LiteralPath $SrcRoot -File -ErrorAction SilentlyContinue |
+        Where-Object { $Extensions -contains $_.Extension.ToLowerInvariant() } |
+        Copy-Item -Destination $DstRoot -Force
 }
 
-# 多款式资源：assets/styles/<style>/{models,fonts}
-$stylesSrc = Join-Path $Root "assets\styles"
-$stylesDst = Join-Path $Stage "assets\styles"
-if (Test-Path $stylesSrc) {
-    Get-ChildItem -LiteralPath $stylesSrc -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-        $styleId = $_.Name
-        $dstModels = Join-Path $stylesDst "$styleId\models"
-        $dstFonts = Join-Path $stylesDst "$styleId\fonts"
-        New-Item -ItemType Directory -Force -Path $dstModels | Out-Null
-        New-Item -ItemType Directory -Force -Path $dstFonts | Out-Null
-        Get-ChildItem -Path (Join-Path $_.FullName "models") -Filter *.stl -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination $dstModels -Force
-        Get-ChildItem -Path (Join-Path $_.FullName "fonts") -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -in @(".ttf", ".otf") } |
-            Copy-Item -Destination $dstFonts -Force
-    }
-}
+Copy-StyleAssets -SrcRoot (Join-Path $Root "assets\models") -DstRoot (Join-Path $Stage "assets\models") -Extensions @(".stl")
+Copy-StyleAssets -SrcRoot (Join-Path $Root "assets\fonts") -DstRoot (Join-Path $Stage "assets\fonts") -Extensions @(".ttf", ".otf")
 
 @(
     (Join-Path $Stage "dist"),
@@ -90,8 +76,12 @@ Plate Number Keychain
 1. Install Python 3.11 or 3.12:
    https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
    (check "Add python.exe to PATH")
-2. Double-click start.bat
-3. First run installs dependencies (needs network)
+2. Create venv and install deps:
+   python -m venv venv
+   venv\Scripts\activate
+   pip install -r requirements.txt
+   (or: powershell -File scripts\install_deps.ps1)
+3. python app.py
 4. Open http://127.0.0.1:5001
 "@
 Set-Content -Path (Join-Path $Stage "README-RUN.txt") -Value $Readme -Encoding UTF8

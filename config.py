@@ -6,10 +6,9 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 兼容旧路径（款式一未迁移到 styles/classic 时仍可用）
-LEGACY_MODELS_DIR = os.path.join(BASE_DIR, "assets", "models")
-LEGACY_FONTS_DIR = os.path.join(BASE_DIR, "assets", "fonts")
-
+MODELS_ROOT = os.path.join(BASE_DIR, "assets", "models")
+FONTS_ROOT = os.path.join(BASE_DIR, "assets", "fonts")
+# 旧路径兼容：assets/styles/<style>/{models,fonts}
 STYLES_ROOT = os.path.join(BASE_DIR, "assets", "styles")
 
 DEFAULT_STYLE = "classic"
@@ -42,20 +41,37 @@ def _has_asset(directory: str, extensions: tuple[str, ...]) -> bool:
 
 
 def _style_asset_dirs(style_id: str) -> tuple[str, str]:
-    """返回 (models_dir, fonts_dir)。classic 可回退到旧版 assets/{models,fonts}。"""
-    root = os.path.join(STYLES_ROOT, style_id)
-    models_dir = os.path.join(root, "models")
-    fonts_dir = os.path.join(root, "fonts")
+    """
+    返回 (models_dir, fonts_dir)。
 
+    优先：
+      assets/models/<style_id>/
+      assets/fonts/<style_id>/
+    回退：
+      assets/styles/<style_id>/{models,fonts}
+      classic 还可回退到 assets/models、assets/fonts 根目录（旧布局）
+    """
+    models_dir = os.path.join(MODELS_ROOT, style_id)
+    fonts_dir = os.path.join(FONTS_ROOT, style_id)
+
+    legacy_models = os.path.join(STYLES_ROOT, style_id, "models")
+    legacy_fonts = os.path.join(STYLES_ROOT, style_id, "fonts")
+
+    if not _has_asset(models_dir, (".stl",)) and _has_asset(legacy_models, (".stl",)):
+        models_dir = legacy_models
+    if not _has_asset(fonts_dir, (".ttf", ".otf")) and _has_asset(
+        legacy_fonts, (".ttf", ".otf")
+    ):
+        fonts_dir = legacy_fonts
+
+    # classic 旧布局：文件直接放在 assets/models、assets/fonts 根下
     if style_id == "classic":
-        if not _has_asset(models_dir, (".stl",)) and _has_asset(
-            LEGACY_MODELS_DIR, (".stl",)
-        ):
-            models_dir = LEGACY_MODELS_DIR
+        if not _has_asset(models_dir, (".stl",)) and _has_asset(MODELS_ROOT, (".stl",)):
+            models_dir = MODELS_ROOT
         if not _has_asset(fonts_dir, (".ttf", ".otf")) and _has_asset(
-            LEGACY_FONTS_DIR, (".ttf", ".otf")
+            FONTS_ROOT, (".ttf", ".otf")
         ):
-            fonts_dir = LEGACY_FONTS_DIR
+            fonts_dir = FONTS_ROOT
 
     return models_dir, fonts_dir
 
@@ -120,6 +136,7 @@ STYLES: dict[str, dict] = {
             "height": 3.0,
         },
         "text_z_base": None,
+        "text_on_top": True,  # 文字贴顶面向上挤出 1mm，总高 ≈ 4mm
         "main_text": {
             "font_size": 18.0,
             "extrude_height": 1.0,  # 底板 3mm + 文字 1mm ≈ 4mm
@@ -128,9 +145,9 @@ STYLES: dict[str, dict] = {
             "auto_fit": True,
             "height_fill_ratio": 0.78,
             "font_height_ratio": 0.684,
-            "left_reserved": 11.0,  # 左侧挂孔预留
-            "right_reserved": 3.0,
-            "horizontal_margin": 2.0,
+            "left_reserved": 5.0,   # 左侧钥匙孔预留
+            "right_reserved": 2.0,
+            "horizontal_margin": 1.5,
             "gap_after_side": 0.0,
         },
         "side_text": None,

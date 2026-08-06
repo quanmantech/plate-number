@@ -108,8 +108,12 @@ def _load_base_stl(path: str) -> tuple[cq.Workplane, Shape]:
 
 
 def _text_z(style: dict, extrude_height: float, bb) -> float:
+    """文字底面放置的 Z 坐标。"""
     if style.get("text_z_base") is not None:
         return style["text_z_base"]
+    # on_top: 贴在空白模型顶面向上挤出；否则嵌入顶面一层（旧双色逻辑）
+    if style.get("text_on_top", False):
+        return bb.zmax
     return bb.zmax - extrude_height
 
 

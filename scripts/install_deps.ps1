@@ -103,7 +103,7 @@ if ($code -ne 0) {
     Write-Host ""
     Write-Err "Common fixes:"
     Write-Err "1) Use Python 3.11 or 3.12 (not 3.14)"
-    Write-Err "2) Delete the local venv folder and run start.bat again"
+    Write-Err "2) Delete the local venv folder and reinstall dependencies"
     Write-Err "3) Check network access to $PipIndex"
     exit 1
 }

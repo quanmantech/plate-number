@@ -10,8 +10,7 @@ runtime/
 output/
 dist/
 *.stl
-!assets/models/*.stl
-!assets/styles/**/*.stl
+!assets/models/**/*.stl
 *.zip
 
 # 本地配置 / 缓存
